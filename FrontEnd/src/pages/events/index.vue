@@ -19,7 +19,7 @@ const newEvent = ref({
     interval: 1,
     weekdays: [],
     nth: null,
-    weekday_for_nth: 'st',
+    weekday_for_nth: null,
     until: null,
     count: null
   }
@@ -80,10 +80,16 @@ function deleteCookie(name) {
 
 onMounted(() => {
   fetchEvents()
-  // Set today as default date for new events
+
   const today = new Date().toISOString().split('T')[0]
   startDate.value = today
   endDate.value = today
+
+  // Ensure correct initial weekdays based on frequency
+  const freq = newEvent.value.recurrence_rule.frequency
+  if (freq === 'WEEKLY') {
+    newEvent.value.recurrence_rule.weekdays = []
+  }
 })
 
 async function fetchEvents() {
@@ -110,7 +116,7 @@ async function createEvent() {
       // Ensure weekdays is a list (backend expects list in serializer input)
       if (payload.recurrence_rule.frequency === 'WEEKLY' || payload.recurrence_rule.frequency === 'DAILY') {
         if (!Array.isArray(payload.recurrence_rule.weekdays)) {
-          payload.recurrence_rule.weekdays = []
+          payload.recurrence_rule.weekdays = [...allWeekdays]
         }
       } else {
         // Clear weekdays for other frequencies
@@ -137,7 +143,7 @@ async function createEvent() {
         weekdays: [],
         nth: null,
         weekday_for_nth: 'st',
-        until: '',
+        until: null,
         count: null
       }
     }

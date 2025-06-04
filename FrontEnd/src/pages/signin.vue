@@ -42,7 +42,7 @@ const goToSignup = () => {
           <div class="logo-icon">
             <span class="material-symbols-outlined">calendar_month</span>
           </div>
-          <h1 class="logo-text"> <a>EventSync</a></h1>
+          <h1 class="logo-text"> <a href="/">EventSync</a></h1>
         </div>
 
         <h2 class="hero-title">Welcome Back</h2>
