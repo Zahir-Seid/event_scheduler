@@ -15,9 +15,9 @@ class RegisterView(generics.CreateAPIView):
         try:
             serializer.is_valid(raise_exception=True)
         except ValidationError as e:
-            if 'email' in e.detail:
+            if 'username' in e.detail:
                 return Response(
-                    {"error": "email already used"},
+                    {"error": "username already used"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
@@ -42,7 +42,7 @@ class LoginView(TokenObtainPairView):
             print(error_message)
             if 'No active account found with the given credentials' in error_message:
                 return Response(
-                    {"error": "Invalid email or password"},
+                    {"error": "Invalid username or password"},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
         return Response(serializer.validated_data, status=status.HTTP_200_OK)

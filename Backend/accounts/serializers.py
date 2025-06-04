@@ -10,27 +10,28 @@ class RegisterSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ('id', 'email', 'password')
+        fields = ('id', 'username', 'password')
 
-    def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError("Email is already in use.")
+    def validate_username(self, value):
+        if User.objects.filter(username=value).exists():
+            raise serializers.ValidationError("Username is already taken.")
         return value
 
     def create(self, validated_data):
-        user = User.objects.create_user(
-            email=validated_data['email'],
+        return User.objects.create_user(
+            username=validated_data['username'],
             password=validated_data['password']
         )
-        return user
+
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
-        token['email'] = user.email
+        token['username'] = user.username
         return token
 
     def validate(self, attrs):
-        attrs['username'] = attrs.get('email')  # needed because JWT expects 'username'
+        attrs['username'] = attrs.get('username')  
         return super().validate(attrs)
+
