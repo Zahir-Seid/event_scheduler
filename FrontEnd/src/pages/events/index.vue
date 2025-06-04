@@ -15,15 +15,19 @@ const newEvent = ref({
   end_datetime: '',
   is_recurring: false,
   recurrence_rule: {
-    frequency: 'DAILY',
+    frequency: 'DAILY',        // 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY'
     interval: 1,
-    weekdays: [],
-    nth: null,
-    weekday_for_nth: null,
-    until: null,
-    count: null
+    weekdays: [],              // Only for WEEKLY
+    nth: null,                 // For MONTHLY and YEARLY (with weekday_for_nth)
+    weekday_for_nth: null,     // 'MO'...'SU' — used with nth
+    day_of_month: null,        // For MONTHLY
+    month: null,               // For YEARLY
+    day: null,                 // For YEARLY (specific date)
+    until: null,               // null or date
+    count: null                // null or number
   }
 })
+
 
 const allWeekdays = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
 
@@ -41,6 +45,18 @@ watch(() => newEvent.value.recurrence_rule.frequency, (newFreq) => {
     newEvent.value.recurrence_rule.weekdays = []
   }
 })
+
+const isDaily = computed(() => newEvent.value.recurrence_rule.frequency === 'DAILY')
+const isWeekly = computed(() => newEvent.value.recurrence_rule.frequency === 'WEEKLY')
+const isMonthly = computed(() => newEvent.value.recurrence_rule.frequency === 'MONTHLY')
+const isYearly = computed(() => newEvent.value.recurrence_rule.frequency === 'YEARLY')
+
+const endsType = ref('never') // 'never' | 'after' | 'date'
+watch(() => newEvent.value.recurrence_rule, (val) => {
+  if (val.count) endsType.value = 'after'
+  else if (val.until) endsType.value = 'date'
+  else endsType.value = 'never'
+}, { deep: true })
 
 // Modal control
 const showEventModal = ref(false)
@@ -113,16 +129,40 @@ async function createEvent() {
     if (!payload.is_recurring) {
       delete payload.recurrence_rule
     } else {
-      // Ensure weekdays is a list (backend expects list in serializer input)
-      if (payload.recurrence_rule.frequency === 'WEEKLY' || payload.recurrence_rule.frequency === 'DAILY') {
-        if (!Array.isArray(payload.recurrence_rule.weekdays)) {
-          payload.recurrence_rule.weekdays = [...allWeekdays]
-        }
+      if (payload.recurrence_rule.frequency === 'WEEKLY') {
+        // OK
       } else {
-        // Clear weekdays for other frequencies
         payload.recurrence_rule.weekdays = []
       }
+
+      // Handle count/until
+      if (endsType.value === 'after') {
+        payload.recurrence_rule.until = null
+      } else if (endsType.value === 'date') {
+        payload.recurrence_rule.count = null
+      } else {
+        payload.recurrence_rule.count = null
+        payload.recurrence_rule.until = null
+      }
+
+      // MONTHLY logic
+      if (payload.recurrence_rule.frequency === 'MONTHLY') {
+        if (payload.recurrence_rule.monthly_type === 'day_of_month') {
+          payload.recurrence_rule.nth = null
+          payload.recurrence_rule.weekday_for_nth = null
+        } else {
+          payload.recurrence_rule.day_of_month = null
+        }
+        delete payload.recurrence_rule.monthly_type
+      }
+
+      // YEARLY logic
+      if (payload.recurrence_rule.frequency !== 'YEARLY') {
+        payload.recurrence_rule.month = null
+        payload.recurrence_rule.day = null
+      }
     }
+
     
     await $fetch(`${baseUrl}/events/`, {
       method: 'POST',
@@ -142,11 +182,16 @@ async function createEvent() {
         interval: 1,
         weekdays: [],
         nth: null,
-        weekday_for_nth: 'st',
+        weekday_for_nth: null,
+        day_of_month: null,
+        month: null,
+        day: null,
         until: null,
-        count: null
+        count: null,
+        monthly_type: 'day_of_month'
       }
     }
+
     
     // Close modal and refresh events
     showEventModal.value = false
@@ -400,96 +445,198 @@ function prevMonth() {
                 <span class="ml-2 text-sm font-medium text-gray-700">Recurring Event</span>
               </label>
               
-              <div v-if="newEvent.is_recurring" class="mt-4 pl-6 border-l-2 border-primary-200 space-y-4">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
-                  <select 
-                    v-model="newEvent.recurrence_rule.frequency"
-                    class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200"
+              <!-- Frequency Select (unchanged) -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Frequency</label>
+            <select 
+              v-model="newEvent.recurrence_rule.frequency"
+              class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200"
+            >
+              <option value="DAILY">Daily</option>
+              <option value="WEEKLY">Weekly</option>
+              <option value="MONTHLY">Monthly</option>
+              <option value="YEARLY">Yearly</option>
+            </select>
+          </div>
+
+            <!-- Interval -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Interval</label>
+              <input
+                v-model.number="newEvent.recurrence_rule.interval"
+                type="number"
+                min="1"
+                class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200"
+                placeholder="Repeat every X interval"
+              />
+            </div>
+
+            <!-- WEEKLY: Weekdays -->
+            <div v-if="isWeekly">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Weekdays</label>
+              <div class="grid grid-cols-7 gap-2">
+                <label 
+                  v-for="day in ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']" 
+                  :key="day"
+                  class="flex flex-col items-center"
+                >
+                  <input 
+                    type="checkbox" 
+                    v-model="newEvent.recurrence_rule.weekdays" 
+                    :value="day"
+                    class="rounded text-primary-600 focus:ring-primary-500"
                   >
-                    <option value="DAILY">Daily</option>
-                    <option value="WEEKLY">Weekly</option>
-                    <option value="MONTHLY">Monthly</option>
-                    <option value="YEARLY">Yearly</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Interval</label>
+                  <span class="text-xs mt-1">{{ day }}</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- MONTHLY Options -->
+            <div v-if="isMonthly">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Monthly Options</label>
+              <div class="space-y-2">
+                <label class="flex items-center">
                   <input
-                    v-model.number="newEvent.recurrence_rule.interval"
+                    type="radio"
+                    value="day_of_month"
+                    v-model="newEvent.recurrence_rule.monthly_type"
+                    class="rounded text-primary-600 focus:ring-primary-500"
+                  />
+                  <span class="ml-2 text-sm text-gray-700">Day of month</span>
+                  <input
+                    v-model.number="newEvent.recurrence_rule.day_of_month"
                     type="number"
                     min="1"
-                    class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200"
-                    placeholder="Repeat every X days/weeks/months"
+                    max="31"
+                    class="ml-2 px-3 py-2 border border-gray-300 rounded-xl"
+                    :disabled="newEvent.recurrence_rule.monthly_type !== 'day_of_month'"
+                  />
+                </label>
+
+                <label class="flex items-center">
+                  <input
+                    type="radio"
+                    value="nth_weekday"
+                    v-model="newEvent.recurrence_rule.monthly_type"
+                    class="rounded text-primary-600 focus:ring-primary-500"
+                  />
+                  <span class="ml-2 text-sm text-gray-700">Nth weekday</span>
+                  <input
+                    v-model.number="newEvent.recurrence_rule.nth"
+                    type="number"
+                    min="-1"
+                    max="5"
+                    class="ml-2 w-16 px-3 py-2 border border-gray-300 rounded-xl"
+                    :disabled="newEvent.recurrence_rule.monthly_type !== 'nth_weekday'"
+                  />
+                  <select
+                    v-model="newEvent.recurrence_rule.weekday_for_nth"
+                    class="ml-2 px-3 py-2 border border-gray-300 rounded-xl"
+                    :disabled="newEvent.recurrence_rule.monthly_type !== 'nth_weekday'"
+                  >
+                    <option v-for="d in ['MO','TU','WE','TH','FR','SA','SU']" :value="d">{{ d }}</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <!-- YEARLY Options -->
+            <div v-if="isYearly">
+              <label class="block text-sm font-medium text-gray-700 mb-2">Yearly Options</label>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs text-gray-500">Month (1-12)</label>
+                  <input
+                    v-model.number="newEvent.recurrence_rule.month"
+                    type="number"
+                    min="1"
+                    max="12"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-xl"
                   />
                 </div>
-                
-                <div v-if="newEvent.recurrence_rule.frequency === 'WEEKLY'">
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Weekdays</label>
-                  <div class="grid grid-cols-7 gap-2">
-                    <label 
-                      v-for="day in ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']" 
-                      :key="day"
-                      class="flex flex-col items-center"
-                    >
-                      <input 
-                        type="checkbox" 
-                        v-model="newEvent.recurrence_rule.weekdays" 
-                        :value="day"
-                        class="rounded text-primary-600 focus:ring-primary-500"
-                      >
-                      <span class="text-xs mt-1">{{ day }}</span>
-                    </label>
-                  </div>
-                </div>
-                
+
                 <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-2">Ends</label>
-                  <div class="space-y-2">
-                    <label class="flex items-center">
-                      <input 
-                        type="radio" 
-                        v-model="newEvent.recurrence_rule.until" 
-                        value="" 
-                        class="rounded text-primary-600 focus:ring-primary-500"
-                      >
-                      <span class="ml-2 text-sm text-gray-700">Never</span>
-                    </label>
-                    <label class="flex items-center">
-                      <input 
-                        type="radio" 
-                        v-model="newEvent.recurrence_rule.until" 
-                        value="after" 
-                        class="rounded text-primary-600 focus:ring-primary-500"
-                      >
-                      <span class="ml-2 text-sm text-gray-700">After</span>
-                      <input
-                        v-model.number="newEvent.recurrence_rule.count"
-                        type="number"
-                        min="1"
-                        class="ml-2 w-20 px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                        placeholder="Count"
-                      >
-                      <span class="ml-2 text-sm text-gray-700">occurrences</span>
-                    </label>
-                    <label class="flex items-center">
-                      <input 
-                        type="radio" 
-                        v-model="newEvent.recurrence_rule.until" 
-                        value="date" 
-                        class="rounded text-primary-600 focus:ring-primary-500"
-                      >
-                      <span class="ml-2 text-sm text-gray-700">On date</span>
-                      <input
-                        v-model="newEvent.recurrence_rule.until"
-                        type="date"
-                        class="ml-2 px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                      >
-                    </label>
-                  </div>
+                  <label class="block text-xs text-gray-500">Day of month</label>
+                  <input
+                    v-model.number="newEvent.recurrence_rule.day"
+                    type="number"
+                    min="1"
+                    max="31"
+                    class="w-full px-3 py-2 border border-gray-300 rounded-xl"
+                    :disabled="!!newEvent.recurrence_rule.nth && !!newEvent.recurrence_rule.weekday_for_nth"
+                  />
+                </div>
+
+                <div class="col-span-2 flex gap-2 items-center">
+                  <span class="text-sm text-gray-700">Or Nth weekday:</span>
+                  <input
+                    v-model.number="newEvent.recurrence_rule.nth"
+                    type="number"
+                    min="-1"
+                    max="5"
+                    class="w-16 px-3 py-2 border border-gray-300 rounded-xl"
+                  />
+                  <select
+                    v-model="newEvent.recurrence_rule.weekday_for_nth"
+                    class="px-3 py-2 border border-gray-300 rounded-xl"
+                  >
+                    <option v-for="d in ['MO','TU','WE','TH','FR','SA','SU']" :value="d">{{ d }}</option>
+                  </select>
                 </div>
               </div>
+            </div>
+
+            <!-- Ends (Never, After, On Date) -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-2">Ends</label>
+              <div class="space-y-2">
+                <label class="flex items-center">
+                  <input 
+                    type="radio" 
+                    v-model="endsType" 
+                    value="never" 
+                    class="rounded text-primary-600 focus:ring-primary-500"
+                  >
+                  <span class="ml-2 text-sm text-gray-700">Never</span>
+                </label>
+                <label class="flex items-center">
+                  <input 
+                    type="radio" 
+                    v-model="endsType" 
+                    value="after" 
+                    class="rounded text-primary-600 focus:ring-primary-500"
+                  >
+                  <span class="ml-2 text-sm text-gray-700">After</span>
+                  <input
+                    v-if="endsType === 'after'"
+                    v-model.number="newEvent.recurrence_rule.count"
+                    type="number"
+                    min="1"
+                    class="ml-2 w-20 px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                    placeholder="Count"
+                  >
+                  <span class="ml-2 text-sm text-gray-700" v-if="endsType === 'after'">occurrences</span>
+                </label>
+                <label class="flex items-center">
+                  <input 
+                    type="radio" 
+                    v-model="endsType" 
+                    value="date" 
+                    class="rounded text-primary-600 focus:ring-primary-500"
+                  >
+                  <span class="ml-2 text-sm text-gray-700">On date</span>
+                  <input
+                    v-if="endsType === 'date'"
+                    v-model="newEvent.recurrence_rule.until"
+                    type="date"
+                    class="ml-2 px-3 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  >
+                </label>
+              </div>
+            </div>
+
+
             </div>
             
             <div class="flex justify-end space-x-4 pt-4">

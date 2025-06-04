@@ -1,38 +1,39 @@
 <script setup>
-import { ref, onMounted} from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { $fetch } from 'ofetch'
 
 const baseUrl = import.meta.env.VITE_API_BASE_URL
-const route = useRoute()
 const router = useRouter()
+const route = useRoute()
+
 const event = ref({
-title: '',
-description: '',
-start_datetime: '',
-end_datetime: '',
-is_recurring: false,
-recurrence_rule: {
+  title: '',
+  description: '',
+  start_datetime: '',
+  end_datetime: '',
+  is_recurring: false,
+  recurrence_rule: {
     frequency: 'DAILY',
     interval: 1,
     weekdays: [],
     nth: null,
-    weekday_for_nth: 'st',
-    until: '',
-    count: null
-}
+    weekday_for_nth: null,
+    day_of_month: null,
+    month: null,
+    day: null,
+    until: null,
+    count: null,
+    monthly_type: 'day_of_month'
+  }
 })
 
 const occurrenceDate = ref('')
+const endsType = ref('never') // 'never', 'after', 'date'
 
-onMounted(async () => {
-await fetchEvent()
-})
-
-// Cookie helper
 function getCookie(name) {
-const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'))
-return match ? decodeURIComponent(match[2]) : null
+  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'))
+  return match ? decodeURIComponent(match[2]) : null
 }
 
 function formatForDatetimeLocal(datetimeStr) {
@@ -42,6 +43,10 @@ function formatForDatetimeLocal(datetimeStr) {
   return localDate.toISOString().slice(0, 16) // "YYYY-MM-DDTHH:MM"
 }
 
+onMounted(async () => {
+  await fetchEvent()
+})
+
 async function fetchEvent() {
   try {
     const accessToken = getCookie('access_token')
@@ -49,9 +54,34 @@ async function fetchEvent() {
       headers: { Authorization: `Bearer ${accessToken}` }
     })
 
-    // Format datetime fields for input
     data.start_datetime = formatForDatetimeLocal(data.start_datetime)
     data.end_datetime = formatForDatetimeLocal(data.end_datetime)
+
+    // Fallback: ensure recurrence_rule exists if missing
+    if (data.is_recurring && !data.recurrence_rule) {
+      data.recurrence_rule = {
+        frequency: 'DAILY',
+        interval: 1,
+        weekdays: [],
+        nth: null,
+        weekday_for_nth: null,
+        day_of_month: null,
+        month: null,
+        day: null,
+        until: null,
+        count: null,
+        monthly_type: 'day_of_month'
+      }
+    }
+
+    // Set endsType for UI
+    if (data.recurrence_rule?.count) {
+      endsType.value = 'after'
+    } else if (data.recurrence_rule?.until) {
+      endsType.value = 'date'
+    } else {
+      endsType.value = 'never'
+    }
 
     event.value = data
   } catch (error) {
@@ -60,75 +90,113 @@ async function fetchEvent() {
 }
 
 async function updateEvent() {
-try {
+  try {
     const accessToken = getCookie('access_token')
-    
-    // Prepare payload based on recurrence selection
-    const payload = { ...event.value }
+
+    const payload = JSON.parse(JSON.stringify(event.value))
+
     if (!payload.is_recurring) {
-    payload.recurrence_rule = null
-    } else if (!payload.recurrence_rule) {
-    // Initialize recurrence rule if needed
-    payload.recurrence_rule = {
-        frequency: 'DAILY',
-        interval: 1,
-        weekdays: [],
-        nth: null,
-        weekday_for_nth: 'st',
-        until: '',
-        count: null
+      payload.recurrence_rule = null
+    } else {
+      if (!payload.recurrence_rule) {
+        payload.recurrence_rule = {
+          frequency: 'DAILY',
+          interval: 1,
+          weekdays: [],
+          nth: null,
+          weekday_for_nth: null,
+          day_of_month: null,
+          month: null,
+          day: null,
+          until: null,
+          count: null,
+          monthly_type: 'day_of_month'
+        }
+      }
+
+      // Weekly handling
+      if (payload.recurrence_rule.frequency !== 'WEEKLY') {
+        payload.recurrence_rule.weekdays = []
+      }
+
+      // Handle ends type logic
+      if (endsType.value === 'after') {
+        payload.recurrence_rule.until = null
+      } else if (endsType.value === 'date') {
+        payload.recurrence_rule.count = null
+      } else {
+        payload.recurrence_rule.count = null
+        payload.recurrence_rule.until = null
+      }
+
+      // Monthly logic
+      if (payload.recurrence_rule.frequency === 'MONTHLY') {
+        if (payload.recurrence_rule.monthly_type === 'day_of_month') {
+          payload.recurrence_rule.nth = null
+          payload.recurrence_rule.weekday_for_nth = null
+        } else {
+          payload.recurrence_rule.day_of_month = null
+        }
+        delete payload.recurrence_rule.monthly_type
+      }
+
+      // Yearly logic
+      if (payload.recurrence_rule.frequency !== 'YEARLY') {
+        payload.recurrence_rule.month = null
+        payload.recurrence_rule.day = null
+      }
     }
-    }
-    
+
     await $fetch(`${baseUrl}/events/${route.params.id}/`, {
-    method: 'PUT',
-    body: payload,
-    headers: { Authorization: `Bearer ${accessToken}` }
+      method: 'PUT',
+      body: payload,
+      headers: { Authorization: `Bearer ${accessToken}` }
     })
+
     alert('Event updated successfully!')
-} catch (error) {
+  } catch (error) {
     console.error('Update failed:', error)
     alert(`Failed to update event: ${error.data?.detail || error.message}`)
-}
+  }
 }
 
 async function cancelOccurrence() {
-try {
+  try {
     const accessToken = getCookie('access_token')
     await $fetch(`${baseUrl}/events/${event.value.id}/cancel-occurrence/`, {
-    method: 'POST',
-    body: { 
+      method: 'POST',
+      body: {
         event: event.value.id,
         occurrence_date: occurrenceDate.value,
         is_cancelled: true
-    },
-    headers: { Authorization: `Bearer ${accessToken}` }
+      },
+      headers: { Authorization: `Bearer ${accessToken}` }
     })
     alert('Occurrence canceled successfully!')
     occurrenceDate.value = ''
-} catch (error) {
+  } catch (error) {
     console.error('Cancel occurrence failed:', error)
     alert(`Failed to cancel occurrence: ${error.data?.detail || error.message}`)
-}
+  }
 }
 
 async function deleteEvent() {
-if (confirm('Are you sure you want to delete this event? This action cannot be undone.')) {
+  if (confirm('Are you sure you want to delete this event? This action cannot be undone.')) {
     try {
-    const accessToken = getCookie('access_token')
-    await $fetch(`${baseUrl}/events/${route.params.id}/`, {
+      const accessToken = getCookie('access_token')
+      await $fetch(`${baseUrl}/events/${route.params.id}/`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${accessToken}` }
-    })
-    router.push('/events/')
+      })
+      router.push('/events/')
     } catch (error) {
-    console.error('Delete failed:', error)
-    alert(`Failed to delete event: ${error.data?.detail || error.message}`)
+      console.error('Delete failed:', error)
+      alert(`Failed to delete event: ${error.data?.detail || error.message}`)
     }
+  }
 }
-}
-
 </script>
+
 
 <template>
 <div id="webcrumbs">
