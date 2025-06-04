@@ -1,0 +1,25 @@
+services:
+  backend:
+    container_name: django_backend
+    build:
+      context: ./Backend
+    volumes:
+      - ./Backend:/app
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+
+  frontend:
+    container_name: vue_frontend
+    build:
+      context: ./FrontEnd
+    volumes:
+      - ./FrontEnd:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    command: npm run dev
+    env_file:
+      - ./FrontEnd/.env
